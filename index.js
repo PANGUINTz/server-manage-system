@@ -1,13 +1,19 @@
 import express from "express";
 import bodyParser from "body-parser";
 import mongoose from "mongoose";
-import cor from "cors";
+import cors from "cors";
 import crypto from "crypto";
+import bcrypt from "bcrypt";
+import dotenv from "dotenv";
+import jwt from "jsonwebtoken";
+import cookieParser from "cookie-parser";
 
 import Customer from "./Models/customer.model.js";
 import transactionModel from "./Models/transaction.model.js";
+import Account from "./Models/account.model.js";
 
-import dotenv from "dotenv";
+import credentials from "./middleware/credentials.js";
+import corsOptions from "./config/corsOptions.js";
 
 dotenv.config();
 
@@ -15,12 +21,20 @@ const app = express();
 
 const port = process.env.PORT;
 
+const mongoURL = process.env.DATABASE_URL;
+
 app.use(bodyParser.urlencoded({ extended: false }));
+
 app.use(bodyParser.json());
-app.use(cor());
+
+app.use(cors(corsOptions));
+
+app.use(cookieParser());
+
+app.use(credentials);
 
 mongoose
-  .connect("mongodb+srv://pang:pang@cluster0.xfagrql.mongodb.net/customer", {
+  .connect(mongoURL, {
     useNewUrlParser: true,
     useUnifiedTopology: true,
   })
@@ -29,6 +43,179 @@ mongoose
 
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);
+});
+
+////////////////////////////////////// refreshToken Controller //////////////////////////////////////////
+
+app.get("/refreshToken", async (req, res) => {
+  try {
+    const cookies = req.cookies;
+    if (!cookies?.jwt) return res.sendStatus(401);
+    const refreshToken = cookies.jwt;
+    res.clearCookie("jwt", { httpOnly: true, sameSite: "None", secure: true });
+
+    const foundUser = await Account.findOne({ refreshToken }).exec();
+
+    // Detected refresh token reuse!
+    if (!foundUser) {
+      jwt.verify(
+        refreshToken,
+        process.env.REFRESH_TOKEN_SECRET,
+        async (err, decoded) => {
+          if (err) return res.sendStatus(403); //Forbidden
+          // Delete refresh tokens of hacked user
+          const hackedUser = await User.findOne({
+            username: decoded.username,
+          }).exec();
+          hackedUser.refreshToken = [];
+          const result = await hackedUser.save();
+        }
+      );
+      return res.sendStatus(403); //Forbidden
+    }
+
+    const newRefreshTokenArray = foundUser.refreshToken.filter(
+      (rt) => rt !== refreshToken
+    );
+
+    // evaluate jwt
+    jwt.verify(
+      refreshToken,
+      process.env.REFRESH_TOKEN_SECRET,
+      async (err, decoded) => {
+        if (err) {
+          // expired refresh token
+          foundUser.refreshToken = [...newRefreshTokenArray];
+          const result = await foundUser.save();
+        }
+        if (err || foundUser.username !== decoded.username)
+          return res.sendStatus(403);
+
+        // Refresh token was still valid
+        const roles = Object.values(foundUser.roles);
+        const accessToken = jwt.sign(
+          {
+            UserInfo: {
+              username: decoded.username,
+            },
+          },
+          process.env.ACCESS_TOKEN_SECRET,
+          { expiresIn: "10s" }
+        );
+
+        const newRefreshToken = jwt.sign(
+          { username: foundUser.username },
+          process.env.REFRESH_TOKEN_SECRET,
+          { expiresIn: "15s" }
+        );
+        // Saving refreshToken with current user
+        foundUser.refreshToken = [...newRefreshTokenArray, newRefreshToken];
+        const result = await foundUser.save();
+
+        // Creates Secure Cookie with refresh token
+        res.cookie("jwt", newRefreshToken, {
+          httpOnly: true,
+          secure: true,
+          sameSite: "None",
+          maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        res.json({ accessToken });
+      }
+    );
+  } catch (error) {}
+});
+
+/////////////////////// Login ////////////////////////////////////
+
+app.post("/login", async (req, res) => {
+  try {
+    const cookies = req.cookies;
+    const { username, password } = req.body;
+    if (!username || !password)
+      return res
+        .status(400)
+        .json({ message: "Username and password are required." });
+
+    const foundUser = await Account.findOne({ username }).exec();
+    if (!foundUser) return res.sendStatus(401); //Unauthorized
+    // evaluate password
+    const match = await bcrypt.compare(password, foundUser.password);
+    if (match) {
+      // create JWTs
+      const accessToken = jwt.sign(
+        {
+          UserInfo: {
+            username: foundUser.username,
+          },
+        },
+        process.env.ACCESS_TOKEN_SECRET,
+        { expiresIn: "12h" }
+      );
+      const newRefreshToken = jwt.sign(
+        { username: foundUser.username },
+        process.env.REFRESH_TOKEN_SECRET,
+        { expiresIn: "24h" }
+      );
+
+      // Changed to let keyword
+      let newRefreshTokenArray = !cookies?.jwt
+        ? foundUser.refreshToken
+        : foundUser.refreshToken.filter((rt) => rt !== cookies.jwt);
+
+      if (cookies?.jwt) {
+        const refreshToken = cookies.jwt;
+        const foundToken = await Account.findOne({ refreshToken }).exec();
+
+        // Detected refresh token reuse!
+        if (!foundToken) {
+          // clear out ALL previous refresh tokens
+          newRefreshTokenArray = [];
+        }
+
+        res.clearCookie("jwt", {
+          httpOnly: true,
+          sameSite: "None",
+          secure: true,
+        });
+      }
+
+      foundUser.refreshToken = [...newRefreshTokenArray, newRefreshToken];
+      const result = await foundUser.save();
+
+      res.cookie("jwt", newRefreshToken, {
+        httpOnly: true,
+        secure: true,
+        sameSite: "None",
+        maxAge: 24 * 60 * 60 * 1000,
+      });
+
+      res.json({ accessToken });
+    } else {
+      return res.status(400).send({ message: "failed", success: false });
+    }
+  } catch (error) {}
+});
+
+app.post("/register", async (req, res) => {
+  const { username, password } = req.body;
+  try {
+    if (!username && !password) {
+      return res
+        .status(401)
+        .send({ message: "กรุณากรอกข้อมูล", success: false });
+    }
+
+    console.log(username, password);
+    const success = await Account.create({
+      username,
+      password: await bcrypt.hash(password, 10),
+    });
+
+    if (success) {
+      res.status(200).send({ message: "สมัครเสร็จสิ้น", success: true });
+    }
+  } catch (error) {}
 });
 
 app.post("/api/addList", async (req, res) => {
