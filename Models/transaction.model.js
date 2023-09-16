@@ -6,11 +6,11 @@ const transactionSchema = new mongoose.Schema({
     required: true,
   },
   Ros: {
-    type: Number,
+    type: String,
     default: 0,
   },
   CYL_R: {
-    type: Number,
+    type: String,
     default: 0,
   },
   AxR: {
@@ -22,11 +22,11 @@ const transactionSchema = new mongoose.Schema({
     default: 0,
   },
   Los: {
-    type: Number,
+    type: String,
     default: 0,
   },
   CYL_L: {
-    type: Number,
+    type: String,
     default: 0,
   },
   AxL: {
@@ -38,19 +38,19 @@ const transactionSchema = new mongoose.Schema({
     default: 0,
   },
   PDR: {
-    type: Number,
+    type: String,
     default: 0,
   },
   PDL: {
-    type: Number,
+    type: String,
     default: 0,
   },
   SHR: {
-    type: Number,
+    type: String,
     default: 0,
   },
   SHL: {
-    type: Number,
+    type: String,
     default: 0,
   },
   FType: {

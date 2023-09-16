@@ -279,7 +279,7 @@ app.post("/api/addList", async (req, res) => {
         Earn,
         Balance,
         Desc,
-        DoP,
+        DoP: DoP || Date.now(),
         Signature,
         slug: crypto.randomBytes(12).toString("hex"),
         customer: data._id,
@@ -323,7 +323,7 @@ app.post("/api/addList", async (req, res) => {
         Earn,
         Balance,
         Desc,
-        DoP,
+        DoP: DoP || Date.now(),
         Signature,
         slug: crypto.randomBytes(12).toString("hex"),
         customer: createCustomer._id,
@@ -346,6 +346,15 @@ app.post("/api/addList", async (req, res) => {
 app.get("/api/getAll", async (req, res) => {
   try {
     const data = await transactionModel.find().populate("customer");
+    return res.status(200).send({ data: data, success: true });
+  } catch (error) {
+    return res.send({ message: error });
+  }
+});
+
+app.get("/api/customer/:slug", async (req, res) => {
+  try {
+    const data = await Customer.find().populate("transactions");
     return res.status(200).send({ data: data, success: true });
   } catch (error) {
     return res.send({ message: error });
