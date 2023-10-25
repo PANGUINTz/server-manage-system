@@ -60,11 +60,18 @@ const transactionSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-
+  dcF: {
+    type: Number,
+    default: 0,
+  },
   LType: {
     type: String,
   },
   LPrice: {
+    type: Number,
+    default: 0,
+  },
+  dcL: {
     type: Number,
     default: 0,
   },
